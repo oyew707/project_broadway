@@ -54,7 +54,7 @@ def main():
 
     # Optimize the likelihood function with MLE
     log.info("Optimizing likelihood function with MLE")
-    losses = hmcmc_optimizer.optimize_w_mle(config, num_epochs=20)
+    losses = hmcmc_optimizer.optimize_w_mle(config, num_epochs=10)
     log.info(f"Log-likelihood: {losses[-1]}: MLE theta: {hmcmc_optimizer.param_state}")
     hmcmc_optimizer.save_state('hmcmc_checkpoint_mle')
 

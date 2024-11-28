@@ -94,8 +94,9 @@ class MyHMCMC:
             # Update H and likelihood
             self.current_H = H
             self.current_ll = ll
-            log.debug(f"Log Likelihood: {ll}")
-            log.debug(f"H: {repr(H)}")
+            if self.verbosity:
+                log.debug(f"Log Likelihood: {ll}")
+                log.debug(f"H: {repr(H)}")
             return ll / 1000  # likelihood is still too high normalize to allow model to explore its parameter space
 
         return log_prob
@@ -222,6 +223,7 @@ class MyHMCMC:
             gc.collect()
             losses.append(ll)
             log.info(f"Epoch {epoch + 1}, Log Likelihood: {-1 * ll}")
+            log.debug(f"Theta: {self.param_state}")
 
         return losses
 
