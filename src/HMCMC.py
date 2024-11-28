@@ -16,8 +16,10 @@ __updated__ = "11/27/24"
 # Imports
 import gc
 import os
+import pickle
 import tensorflow as tf
 import tensorflow_probability as tfp
+from src.H import VectorizedH
 from src.likelihood import log_likelihood_optimized, LikelihoodConfig
 from src.logger import getlogger
 
@@ -222,3 +224,92 @@ class MyHMCMC:
             log.info(f"Epoch {epoch + 1}, Log Likelihood: {-1 * ll}")
 
         return losses
+
+    def save_state(self, directory: str):
+        """
+        -------------------------------------------------------
+        Saves the current state of the HMCMC sampler including H values
+        and parameter state to files
+        -------------------------------------------------------
+        Parameters:
+            directory - directory to save state files (str)
+        -------------------------------------------------------
+        """
+        directory = os.path.join(os.getcwd(), directory)
+        if not os.path.isdir(directory):
+            os.mkdir(directory)
+
+        # Save H values if they exist
+        if self.current_H is not None:
+            h_path = os.path.join(directory, 'current_h.pkl')
+            self.current_H.save(h_path)
+            log.info(f'Saved current H values to {h_path}')
+
+        # Save parameter state and other variables
+        state_dict = {
+            'param_state': self.param_state.numpy() if self.param_state is not None else None,
+            'current_ll': self.current_ll,
+            'num_dims_theta': self.num_dims_theta,
+            'num_dims_h': self.num_dims_h,
+            'num_chains': self.num_chains,
+            'learning_rate': self.learning_rate,
+            'clip_val': self.clip_val
+        }
+
+        state_path = os.path.join(directory, 'state.pkl')
+        try:
+            with open(state_path, 'wb') as f:
+                pickle.dump(state_dict, f)
+            log.info(f'Saved HMCMC state to {state_path}')
+        except Exception as e:
+            log.error(f'Failed to save HMCMC state to {state_path}: {str(e)}')
+            raise
+
+    def load_state(self, directory: str, likelihood_config: LikelihoodConfig):
+        """
+        -------------------------------------------------------
+        Loads the HMCMC state from files in the given directory
+        -------------------------------------------------------
+        Parameters:
+            directory - directory containing state files (str)
+            likelihood_config - data configuration for likelihood computation (LikelihoodConfig)
+        -------------------------------------------------------
+        """
+        directory = os.path.join(os.getcwd(), directory)
+
+        # Load parameter state and other variables
+        state_path = os.path.join(directory, 'state.pkl')
+        assert os.path.isfile(state_path), FileNotFoundError(f"No state file found at {state_path}")
+
+        try:
+            with open(state_path, 'rb') as f:
+                state_dict = pickle.load(f)
+
+            # Restore parameter state
+            if state_dict['param_state'] is not None:
+                self.param_state = tf.Variable(state_dict['param_state'])
+
+            # Restore other variables
+            self.current_ll = state_dict['current_ll']
+            self.num_dims_theta = state_dict['num_dims_theta']
+            self.num_dims_h = state_dict['num_dims_h']
+            self.num_chains = state_dict['num_chains']
+            self.learning_rate = state_dict['learning_rate']
+            self.clip_val = state_dict['clip_val']
+
+            log.info(f'Successfully loaded HMCMC state from {directory}')
+
+        except Exception as e:
+            log.error(f'Failed to load HMCMC state from {directory}: {str(e)}')
+            raise
+
+        # Load H values if they exist
+        h_path = os.path.join(directory, 'current_h.pkl')
+        if os.path.isfile(h_path):
+            if self.current_H is None:
+                self.current_H = VectorizedH(k_dim=self.num_dims_h, node_attrs=likelihood_config.node_attrs,
+                                             node_stats=likelihood_config.node_stats)
+            self.current_H.load(h_path)
+            log.info(f'Loaded H values from {h_path}')
+
+        return

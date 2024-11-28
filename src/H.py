@@ -13,11 +13,11 @@ __updated__ = "11/27/24"
 
 # Imports
 import os
+import pickle
 from collections import defaultdict
 import numpy as np
 import tensorflow as tf
 from src.logger import getlogger
-
 
 # Constants
 loglevel = os.getenv('LOGLEVEL', 'INFO').lower()
@@ -203,3 +203,56 @@ class VectorizedH:
         )
 
         return H_values
+
+    def save(self, filepath: str):
+        """
+        -------------------------------------------------------
+        Saves the VectorizedH instance's data to a pickle file
+        -------------------------------------------------------
+        Parameters:
+            filepath - path to save the pickle file (str or Path)
+        -------------------------------------------------------
+        """
+        save_dict = {
+            'k_dim': self.k_dim,
+            'lookup': self.lookup
+        }
+
+        try:
+            with open(filepath, 'wb') as f:
+                pickle.dump(save_dict, f)
+            log.info(f'Successfully saved VectorizedH to {filepath}')
+        except Exception as e:
+            log.warning(f'Failed to save VectorizedH to {filepath}: {str(e)}')
+            pass
+
+    def load(self, filepath: str):
+        """
+        -------------------------------------------------------
+        Loads the lookup dictionary and k_dim from a pickle file and updates
+        the VectorizedH instance
+        -------------------------------------------------------
+        Parameters:
+            filepath - path to the pickle file to load (str or Path)
+        -------------------------------------------------------
+        """
+        assert os.path.isfile(filepath), f'File {filepath} does not exist'
+
+        try:
+            with open(filepath, 'rb') as f:
+                loaded_dict = pickle.load(f)
+
+            # Verify the loaded dictionary has required keys
+            required_keys = {'k_dim', 'lookup'}
+            if not all(key in loaded_dict for key in required_keys):
+                raise ValueError(f"Loaded file missing required keys: {required_keys}")
+
+            # Update instance attributes
+            self.k_dim = loaded_dict['k_dim']
+            self.lookup = loaded_dict['lookup']
+
+            log.info(f'Successfully loaded VectorizedH from {filepath}')
+
+        except Exception as e:
+            log.error(f'Failed to load VectorizedH from {filepath}: {str(e)}')
+            raise 'Cannot load H'
