@@ -66,6 +66,7 @@ class VectorizedVStar(tf.Module):
 
         # Concatenate inputs along the last dimension
         if len(xi.shape) == 3:  # Input should be [batch_size, x_dim]'
+            log.debug('Computing V star for batch')
             # Reshape si, sj to match broadcasting dimensions
             si_expanded = tf.tile(tf.expand_dims(si, -1), [1, n, 1])  # [unique_n, n, 1]
             sj_expanded = tf.tile(tf.expand_dims(sj, 0), [unique_n, 1, 1])  # [unique_n, n, 1]
@@ -90,9 +91,12 @@ class VectorizedVStar(tf.Module):
             # Remove the last dimension and reshape to [unique_n, n]
             result = tf.reshape(dot_products, [unique_n, n])
         else:
+            log.debug('Computing V star for pairs')
             inputs = tf.concat([xi, xj, si[..., tf.newaxis], sj[..., tf.newaxis]], axis=-1)
 
             result = tf.matmul(tf.cast(inputs, tf.float16), theta_reshaped)
+            result = tf.squeeze(result)
+            log.debug(f'Result: {result} shape: {result.shape}')
 
         return result
 

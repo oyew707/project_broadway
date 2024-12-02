@@ -96,8 +96,9 @@ class MyHMCMC:
             self.current_ll = ll
             if self.verbosity:
                 log.debug(f"Log Likelihood: {ll}")
+                log.debug(f"Theta: {theta}")
                 log.debug(f"H: {repr(H)}")
-            return ll / 1000  # likelihood is still too high normalize to allow model to explore its parameter space
+            return ll 
 
         return log_prob
 
@@ -199,14 +200,14 @@ class MyHMCMC:
         assert num_epochs > 0, "num_epochs must be a positive integer"
 
         log.info("Optimizing with MLE")
-        self.param_state = tf.Variable(parameter_initializer([self.num_dims_theta], dtype=tf.float32))
+        self.param_state = tf.Variable(parameter_initializer([self.num_dims_theta], dtype=tf.float32)) if self.param_state is None else self.param_state
         optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
         ll_function = self.log_likelihood_wrapper(likelihood_config)
         losses = []
 
         def train_step():
             with tf.GradientTape() as tape:
-                ll = ll_function(self.param_state)
+                ll = -1*ll_function(self.param_state)
 
             # Get gradients
             grads = tape.gradient(ll, [self.param_state])
@@ -214,7 +215,10 @@ class MyHMCMC:
             clipped_grads = [tf.clip_by_value(g, -self.clip_val, self.clip_val) for g in grads]
             log.debug(f"{clipped_grads=}, {grads=}")
             # update parameters by applying gradients
+            old_params = self.param_state.numpy()
             optimizer.apply_gradients(zip(clipped_grads, [self.param_state]))
+            new_params = self.param_state.numpy()
+            log.debug(f"Parameter changes: {new_params - old_params}")
 
             return ll
 
