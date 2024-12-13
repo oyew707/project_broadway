@@ -179,7 +179,7 @@ class TestNetworkLikelihood(unittest.TestCase):
         np.testing.assert_array_almost_equal(psi_values.numpy(), expected_psi.numpy(), decimal=4)
 
     @patch('src.likelihood.H_star')
-    def test_log_likelihood(self, mock_h_star):
+    def test_log_likelihood_unnormalized(self, mock_h_star):
         """Test log likelihood calculation with mocked H_star"""
         # Arrange
         # Create mock H* values
@@ -190,6 +190,45 @@ class TestNetworkLikelihood(unittest.TestCase):
 
         # Act
         ll, _ = log_likelihood_optimized(self.theta, self.config, H=mock_h)
+
+        # Assert
+        # Manual calculation for simple network:
+
+        # For edge 1-2: L12=1, V12
+        u12 = 0.5 * 1 + (-0.5) * 0 + 0.3 * 0 + (-0.3) * 1 + 0.2 * 1 + (-0.2) * 2  # = 0
+        u21 = 0.5 * 0 + (-0.5) * 1 + 0.3 * 1 + (-0.3) * 0 + 0.2 * 2 + (-0.2) * 1  # = -0.5 + 0.3 + 0.4 - 0.2 = 0
+        v12 = u12 + u21  # = 0.0
+        # For edge 2-1: L21=1, V21
+        v21 = u21 + u12  # = 0.0
+        # For edge 2-3: L23=1, V23
+        u23 = 0.5 * 0 + (-0.5) * 1 + 0.3 * 1 + (-0.3) * 1 + 0.2 * 2 + (-0.2) * 1  # = -0.3
+        u32 = 0.5 * 1 + (-0.5) * 1 + 0.3 * 0 + (-0.3) * 1 + 0.2 * 1 + (-0.2) * 2  # = -0.5
+        v23 = u23 + u32  # = -0.8
+        # For edge 3-2: L32=1, V32
+        v32 = u32 + u23
+        # ll_edge = 0.5 * Lij * (Vij - log(1+Hi) - log(1+Hj))
+        edge_ll = 0.5 * 1 * ((v12 - np.log(1.5) - np.log1p(.5)) + (v23 - np.log1p(.5) - np.log1p(.5)) +
+                             (v21 - np.log(1.5) - np.log1p(.5)) + (v32 - np.log1p(.5) - np.log1p(.5)))
+        # Node terms: log(s) - log(1 + H(x_i))
+        node_ll = ((np.log(1) - np.log(1 + 0.5)) +  # Node 1 -> 2
+                   (np.log(2) - np.log(1 + 0.5)) +  # Node 2 -> 1
+                   (np.log(2) - np.log(1 + 0.5)) +  # Node 2 -> 3
+                   (np.log(1) - np.log(1 + 0.5)))  # Node 3
+        expected_ll = edge_ll + node_ll
+        self.assertAlmostEqual(ll.numpy(), expected_ll, places=2)
+
+    @patch('src.likelihood.H_star')
+    def test_log_likelihood_normalized(self, mock_h_star):
+        """Test log likelihood calculation with mocked H_star"""
+        # Arrange
+        # Create mock H* values
+        mock_h = Mock()
+        mock_h.k_dim = 1
+        mock_h.return_value = tf.ones([4, 1], dtype=tf.float16) * 0.5
+        mock_h_star.return_value = mock_h
+
+        # Act
+        ll, _ = log_likelihood_optimized(self.theta, self.config, H=mock_h, use_mean=True)
 
         # Assert
         # Manual calculation for simple network:

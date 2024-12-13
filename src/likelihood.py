@@ -166,7 +166,7 @@ def vectorized_log_likelihood_contribution(Lijt: tf.Tensor, x_i: tf.Tensor, x_j:
 
 
 def log_likelihood_optimized(theta: tf.Tensor, likelihood_config: LikelihoodConfig,
-                             H: Optional[VectorizedH] = None):
+                             H: Optional[VectorizedH] = None, use_mean: bool = False) -> tf.Tensor:
     """
     -------------------------------------------------------
     Computes the log-likelihood for the network formation model using
@@ -177,6 +177,7 @@ def log_likelihood_optimized(theta: tf.Tensor, likelihood_config: LikelihoodConf
        theta - model parameters (tf.Tensor)
        likelihood_config - configuration for likelihood computation with node_attrs, node_stats, weights, edges (LikelihoodConfig)
        H - optional pre-computed H function (VectorizedH or None)
+       use_mean - whether to use mean or sum for normalization (bool)
     Returns:
        ll - computed log-likelihood value (tf.Tensor)
        H - updated H function after computation (VectorizedH)
@@ -212,14 +213,14 @@ def log_likelihood_optimized(theta: tf.Tensor, likelihood_config: LikelihoodConf
     # Sum edge contributions
     log.debug(f"Is NA or infinity: {tf.reduce_any(tf.math.is_nan(edge_ll)) or tf.reduce_any(tf.math.is_inf(edge_ll))}")
     # Normalize by number of edges
-    ll = tf.reduce_mean(tf.cast(edge_ll, tf.float32))
+    ll = tf.reduce_mean(tf.cast(edge_ll, tf.float32)) if use_mean else tf.reduce_sum(tf.cast(edge_ll, tf.float32))
     log.debug(f'Log likelihood: {ll}')
 
     # Add node-specific terms
-    node_terms = tf.math.log(tf.squeeze(s_i)) - tf.math.log1p(tf.squeeze(H(x_i)))
+    node_term = tf.math.log(tf.squeeze(s_i)) - tf.math.log1p(tf.squeeze(H(x_i)))
     # Note node_terms should exist because we only consider s_i > 0 and 1 + H > 0
     # Normalize by number of nodes
-    ll += tf.reduce_mean(tf.cast(node_terms, tf.float32))
+    ll += tf.reduce_mean(tf.cast(node_term, tf.float32)) if use_mean else tf.reduce_sum(tf.cast(node_term, tf.float32))
     # return tf.math.reduce_sum(theta), H
 
     return ll, H

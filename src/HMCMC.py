@@ -68,13 +68,14 @@ class MyHMCMC:
         self.learning_rate = lr
         self.clip_val = clip_val
 
-    def log_likelihood_wrapper(self, likelihood_config: LikelihoodConfig) -> callable:
+    def log_likelihood_wrapper(self, likelihood_config: LikelihoodConfig, use_mean: bool = False) -> callable:
         """
         -------------------------------------------------------
         Creates a wrapper function for computing log likelihood with gradient tracking
         -------------------------------------------------------
         Parameters:
            likelihood_config - data configuration for likelihood computation (LikelihoodConfig)
+              use_mean - whether to use the mean for normalizing likelihood (bool, default=False
         Returns:
            log_prob - wrapped log likelihood function with gradient tracking (callable)
         -------------------------------------------------------
@@ -85,7 +86,7 @@ class MyHMCMC:
             with tf.GradientTape() as tape:
                 tape.watch(theta)
                 # theta = tf.clip_by_value(theta, -5.0, 5.0)
-                ll, H = log_likelihood_optimized(theta, likelihood_config, H=self.current_H)
+                ll, H = log_likelihood_optimized(theta, likelihood_config, H=self.current_H, use_mean=use_mean)
 
             # Adding gradient clipping
             grads = tape.gradient(ll, theta)
@@ -202,7 +203,7 @@ class MyHMCMC:
         log.info("Optimizing with MLE")
         self.param_state = tf.Variable(parameter_initializer([self.num_dims_theta], dtype=tf.float32)) if self.param_state is None else self.param_state
         optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
-        ll_function = self.log_likelihood_wrapper(likelihood_config)
+        ll_function = self.log_likelihood_wrapper(likelihood_config, use_mean=True)
         losses = []
 
         def train_step():
