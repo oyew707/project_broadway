@@ -15,7 +15,7 @@ import tensorflow as tf
 from unittest.mock import Mock, patch
 from src.Psi import compute_psi_values
 from src.VStar import VectorizedVStar, compute_all_v_values
-from src.likelihood import H_star, LikelihoodConfig, log_likelihood_optimized, H_star, calculate_weights
+from src.likelihood import LikelihoodConfig, log_likelihood_optimized, calculate_weights
 
 # Constants
 
