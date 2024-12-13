@@ -159,8 +159,6 @@ def vectorized_log_likelihood_contribution(Lijt: tf.Tensor, x_i: tf.Tensor, x_j:
     # Compute H values for all nodes at once
     H_i = tf.squeeze(H(x_i))
     H_j = tf.squeeze(H(x_j))
-    log.debug(f"V*: {V}, shape: {V.shape}")
-    log.debug(f"H values: {H_i}, {H_j}, {H_i.shape=}, {H_j.shape=}")
 
     # Compute log likelihood contributions vectorized
     ll = 0.5 * Lijt * (V - tf.math.log1p(H_i) - tf.math.log1p(H_j))
@@ -210,7 +208,6 @@ def log_likelihood_optimized(theta: tf.Tensor, likelihood_config: LikelihoodConf
     edge_ll = vectorized_log_likelihood_contribution(
         Lijt, x_i, x_j, s_i, s_j, theta, H,
     )
-    log.debug(f"Edge ll components: {edge_ll}, normalizer: {tf.reduce_sum(Lijt)} shape: {edge_ll.shape}")
 
     # Sum edge contributions
     log.debug(f"Is NA or infinity: {tf.reduce_any(tf.math.is_nan(edge_ll)) or tf.reduce_any(tf.math.is_inf(edge_ll))}")
@@ -220,7 +217,6 @@ def log_likelihood_optimized(theta: tf.Tensor, likelihood_config: LikelihoodConf
 
     # Add node-specific terms
     node_terms = tf.math.log(tf.squeeze(s_i)) - tf.math.log1p(tf.squeeze(H(x_i)))
-    log.debug(f"Node terms: {node_terms} , normalizer: {tf.shape(x_i)[0]} shape: {node_terms.shape}")
     # Note node_terms should exist because we only consider s_i > 0 and 1 + H > 0
     # Normalize by number of nodes
     ll += tf.reduce_mean(tf.cast(node_terms, tf.float32))

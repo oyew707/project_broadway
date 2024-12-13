@@ -35,6 +35,7 @@ class VectorizedPsi(tf.Module):
         """
         -------------------------------------------------------
         Computes vectorized PSI values for batches of network data.
+        ψ = w * s * exp(V) / (1 + H)
         -------------------------------------------------------
         Parameters:
             s_batch - batch of network statistics [unique_n, n] (tf.Tensor)
