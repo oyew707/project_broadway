@@ -246,7 +246,7 @@ class ReparameterizationVI:
         elbo = log_p_x_theta - log_q
         return elbo
 
-    def optimize(self, likelihood_config: LikelihoodConfig, optimize_alpha: bool = False):
+    def optimize(self, likelihood_config: LikelihoodConfig, optimize_alpha: bool = False, patience: int = 3):
         """
         -------------------------------------------------------
         Optimizes the model parameters using the reparameterization
@@ -255,11 +255,16 @@ class ReparameterizationVI:
         Parameters:
             likelihood_config - configuration for likelihood computation (LikelihoodConfig)
             optimize_alpha - whether to optimize the conjugate hyperparameters (bool)
+            patience - number of epochs to wait for improvement before stopping (int)
         Returns:
             losses - list of computed losses for each epoch (list)
         -------------------------------------------------------
         """
+        assert self.num_epochs >= patience > 0, "Patience must be greater than 0 and less than the number of epochs"
+
         losses = []
+        prev_loss = float('inf')
+        not_improve_count = 0
         # Initialize parameters
         self._initialize_parameters()
         log_prob = self.log_likelihood_wrapper(likelihood_config, use_mean=True)
@@ -288,6 +293,15 @@ class ReparameterizationVI:
                 log.debug(f"{clipped_grads=}, {gradients=}")
                 optimizer.apply_gradients(
                     zip(gradients, [self.variational_params['mean'], self.variational_params['variance']]))
+
+            if prev_loss - loss < 1e-6:
+                not_improve_count += 1
+                if not_improve_count >= patience:
+                    log.info(f"Early stopping at epoch {epoch + 1}")
+                    break
+            else:
+                not_improve_count = 0
+            prev_loss = loss
             if self.verbose:
                 log.info(f"Epoch: {epoch}, ELBO: {elbo}")
         return losses

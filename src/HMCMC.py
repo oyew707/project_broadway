@@ -186,7 +186,7 @@ class MyHMCMC:
         return best_sample, samples, log_probs
         # return samples, log_probs
 
-    def optimize_w_mle(self, likelihood_config: LikelihoodConfig, num_epochs):
+    def optimize_w_mle(self, likelihood_config: LikelihoodConfig, num_epochs: int, patience: int=3):
         """
         -------------------------------------------------------
         Optimizes parameters using maximum likelihood estimation
@@ -194,17 +194,21 @@ class MyHMCMC:
         Parameters:
           likelihood_config - data configuration for likelihood computation (LikelihoodConfig)
           num_epochs - number of training epochs (int > 0)
+            patience - number of epochs to wait before early stopping (int > 0, default=3)
         Returns:
           losses - list of log likelihood values during training (list of tf.Tensor)
         -------------------------------------------------------
         """
         assert num_epochs > 0, "num_epochs must be a positive integer"
+        assert num_epochs >= patience >= 0, "patience must be a positive integer and less than epochs"
 
         log.info("Optimizing with MLE")
-        self.param_state = tf.Variable(parameter_initializer([self.num_dims_theta], dtype=tf.float32)) if self.param_state is None else self.param_state
+        self.param_state = tf.Variable(parameter_initializer([self.num_dims_theta], dtype=tf.float32), trainable=True) if self.param_state is None else self.param_state
         optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
         ll_function = self.log_likelihood_wrapper(likelihood_config, use_mean=True)
         losses = []
+        prev_loss = float('inf')
+        improve_count = 0
 
         def train_step():
             with tf.GradientTape() as tape:
@@ -225,6 +229,14 @@ class MyHMCMC:
 
         for epoch in range(num_epochs):
             ll = train_step()
+            if prev_loss - ll < 1e-6:
+                improve_count += 1
+                if improve_count >= patience:
+                    log.info(f"Early stopping at epoch {epoch + 1}")
+                    break
+            else:
+                improve_count = 0
+            prev_loss = ll
             gc.collect()
             losses.append(ll)
             log.info(f"Epoch {epoch + 1}, Log Likelihood: {-1 * ll}")
@@ -263,7 +275,7 @@ class MyHMCMC:
             'clip_val': self.clip_val
         }
 
-        state_path = os.path.join(directory, 'state.pkl')
+        state_path = os.path.join(directory, 'hmcmc_state.pkl')
         try:
             with open(state_path, 'wb') as f:
                 pickle.dump(state_dict, f)
@@ -285,7 +297,7 @@ class MyHMCMC:
         directory = os.path.join(os.getcwd(), directory)
 
         # Load parameter state and other variables
-        state_path = os.path.join(directory, 'state.pkl')
+        state_path = os.path.join(directory, 'hmcmc_state.pkl')
         assert os.path.isfile(state_path), FileNotFoundError(f"No state file found at {state_path}")
 
         try:
