@@ -12,8 +12,9 @@ __updated__ = "12/14/24"
 
 # Imports
 import os
-from typing import Callable, Optional
 import pickle
+from typing import Callable, Optional
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -23,11 +24,16 @@ from src.logger import getlogger
 
 # Constants
 loglevel = os.getenv('LOGLEVEL', 'INFO').lower()
-log = getlogger(__name__, loglevel)
+log = getlogger(__name__, 'debug')
 tf.config.run_functions_eagerly(True)
 SEED = int(os.getenv('RANDOMSEED', '4'))
 tf.random.set_seed(SEED)
-parameter_initializer = tf.keras.initializers.RandomNormal(
+mean_parameter_initializer = tf.keras.initializers.RandomNormal(
+    seed=SEED
+)
+var_parameter_initializer = tf.keras.initializers.RandomUniform(
+    minval=0.1,  # Small positive value
+    maxval=1.0,
     seed=SEED
 )
 
@@ -113,12 +119,11 @@ class ReparameterizationVI:
         """
         self.variational_params = {
             'mean': tf.Variable(
-                initial_value=parameter_initializer(shape=[self.num_dims_theta], dtype=tf.float32),
+                initial_value=mean_parameter_initializer(shape=[self.num_dims_theta], dtype=tf.float32),
                 trainable=True
             ),
-            'variance': tfp.util.TransformedVariable(
-                initial_value=parameter_initializer(shape=[self.num_dims_theta], dtype=tf.float32),
-                bijector=tfp.bijectors.Softplus(),
+            'variance': tf.Variable(
+                initial_value=tf.abs(var_parameter_initializer(shape=[self.num_dims_theta], dtype=tf.float32)),
                 dtype=tf.float32,
                 name='variance',
                 trainable=True
@@ -144,14 +149,16 @@ class ReparameterizationVI:
             distribution - variational distribution for the model parameters (tfp.distributions.Distribution)
         """
         assert self.variational_params is not None, "Variational parameters must be initialized"
-        if kwargs['alpha'] is True:
+        if kwargs.get('alpha') is not None:
+            assert self.conjugate_prior_parameters is not None, "Variational parameters must be initialized"
             return tfp.distributions.Gamma(
-                concentration=self.variational_params['alpha'],
-                rate=self.variational_params['beta']
+                concentration=self.conjugate_prior_parameters['alpha'],
+                rate=self.conjugate_prior_parameters['beta']
             )
-        return tfp.distributions.Normal(
+        var = tf.nn.softplus(self.variational_params['variance'])
+        return tfp.distributions.MultivariateNormalDiag(
             loc=self.variational_params['mean'],
-            scale=tf.math.sqrt(self.variational_params['variance'])
+            scale_diag=tf.math.sqrt(var)
         )
 
     def sample_theta(self, alpha: Optional[tf.Tensor] = None):
@@ -167,12 +174,16 @@ class ReparameterizationVI:
             theta - sampled model parameters (tf.Tensor)
         """
         assert self.variational_params is not None, "Variational parameters must be initialized"
-        epsilon = tf.random.normal(shape=[self.num_dims_theta, self.num_samples], dtype=tf.float32)
+        epsilon = tf.random.normal(shape=[self.num_dims_theta], dtype=tf.float32, )
+        # Helps prevent negative values for variance
+        var = tf.nn.softplus(self.variational_params['variance'])
+        mu = self.variational_params['mean']
         if alpha is None:
-            theta = self.variational_params['mean'] + epsilon * tf.math.sqrt(self.variational_params['variance'])
+            log.debug(f"{mu=}, {var=}, {epsilon=}")
+            theta = mu + epsilon * tf.math.sqrt(var)
         else:
-            theta = self.variational_params['mean'] + tf.sqrt(1 / alpha) * epsilon * tf.math.sqrt(
-                self.variational_params['variance'])
+            log.debug(f"{mu=}, {var=}, {epsilon=} {alpha=}")
+            theta = mu + tf.sqrt(1 / alpha) * epsilon * tf.math.sqrt(var)
         return theta
 
     def sample_alpha(self):
@@ -234,16 +245,20 @@ class ReparameterizationVI:
         alpha = self.sample_alpha() if optimize_alpha else None
         # Draws 1 sample from theta
         theta = self.sample_theta(alpha=alpha)
+        log.debug(f"{theta=}, {alpha=}")
         # Compute log q; q(θ,α;λ) = q(θ|α;λ_θ)q(α;λ_α)
-        log_q = self.variational_distribution().log_prob(theta) + self.variational_distribution(alpha=True).log_prob(
-            alpha) if optimize_alpha else self.variational_distribution().log_prob(theta)
+        log_q = (tf.reduce_sum(self.variational_distribution().log_prob(theta)) +
+                 tf.reduce_sum(self.variational_distribution(alpha=True).log_prob(alpha))) if optimize_alpha else (
+                    tf.reduce_sum(self.variational_distribution().log_prob(theta)))
         # Compute log likelihood
         log_likelihood = log_likelihood(theta)
+        log.debug(f'{log_likelihood=}, {log_q=}')
         # Compute joint probability
         log_p_x_theta = log_likelihood + self.log_prior_theta(theta, None)
 
         # Compute ELBO
         elbo = log_p_x_theta - log_q
+        log.debug(f"{elbo=}")
         return elbo
 
     def optimize(self, likelihood_config: LikelihoodConfig, optimize_alpha: bool = False, patience: int = 3):
@@ -279,7 +294,7 @@ class ReparameterizationVI:
                                                  self.variational_params['variance'],
                                                  self.conjugate_prior_parameters['alpha'],
                                                  self.conjugate_prior_parameters['beta']])
-                clipped_grads = [tf.clip_by_value(g, -self.clip_val, self.clip_val) for g in grads]
+                clipped_grads = [tf.clip_by_value(g, -self.clip_val, self.clip_val) for g in gradients]
                 log.debug(f"{clipped_grads=}, {gradients=}")
                 optimizer.apply_gradients(
                     zip(gradients, [self.variational_params['mean'],
@@ -289,7 +304,7 @@ class ReparameterizationVI:
                 )
             else:
                 gradients = tape.gradient(loss, [self.variational_params['mean'], self.variational_params['variance']])
-                clipped_grads = [tf.clip_by_value(g, -self.clip_val, self.clip_val) for g in grads]
+                clipped_grads = [tf.clip_by_value(g, -self.clip_val, self.clip_val) for g in gradients]
                 log.debug(f"{clipped_grads=}, {gradients=}")
                 optimizer.apply_gradients(
                     zip(gradients, [self.variational_params['mean'], self.variational_params['variance']]))
@@ -396,4 +411,3 @@ class ReparameterizationVI:
             log.info(f'Loaded H values from {h_path}')
 
         return
-

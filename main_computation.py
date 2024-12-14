@@ -152,7 +152,7 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
 
         # Optimize the likelihood function with VI
         log.info("Optimizing likelihood function with VI")
-        losses = vi_optimizer.optimize(config, optimize_alpha=False)
+        losses = vi_optimizer.optimize(config, optimize_alpha=True)
         params = vi_optimizer.variational_params['mean']
         log.info(f"Loss/ELBO: {-losses[-1]}: VI theta: {params}")
         vi_optimizer.save_state(args.run_path)

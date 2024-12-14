@@ -12,12 +12,17 @@ __updated__ = "11/27/24"
 # Imports
 import os
 import tensorflow as tf
+from tensorflow.keras import mixed_precision
 from src.H import VectorizedH
 from src.logger import getlogger
 
 # Constants
 loglevel = os.getenv('LOGLEVEL', 'INFO').lower()
-log = getlogger(__name__, loglevel)
+log = getlogger(__name__, 'debug')
+EPSILON = 1e-6
+policy = mixed_precision.Policy('mixed_float16')
+mixed_precision.set_global_policy(policy)
+MAX_EXP = 10
 
 
 class VectorizedPsi(tf.Module):
@@ -57,10 +62,12 @@ class VectorizedPsi(tf.Module):
         H_values = tf.reshape(H_batch, [-1, k_dim])  # [unique_n*n, k]
 
         # Compute numerator
-        num = tf.exp(V_flat)[..., tf.newaxis]  # [unique_n*n, 1]
+        num = tf.exp(tf.minimum(V_flat, MAX_EXP))[..., tf.newaxis]  # [unique_n*n, 1]
         if tf.reduce_any(tf.math.is_nan(num)) or tf.reduce_any(tf.math.is_inf(num)):
-            log.debug(f'{V_flat=}')
-            log.debug(f'{num=}')
+            is_nan_or_inf = tf.math.is_nan(num) | tf.math.is_inf(num)
+            indices = tf.where(is_nan_or_inf)[..., 0]
+            log.debug(f' {tf.gather(V_flat, indices)=}')
+            log.debug(f'{tf.gather(num, indices)=}')
             raise ValueError('NAN when computing psi: numerator')
 
         # Compute denominator
@@ -71,12 +78,15 @@ class VectorizedPsi(tf.Module):
         w_flat = w_flat[..., tf.newaxis]  # [unique_n*n, 1]
 
         # Compute final result
-        res_flat = w_flat * s_flat * num / denom  # [unique_n*n, k]
+        res_flat = tf.cast(w_flat, tf.float32) * tf.cast(s_flat, tf.float32) * (tf.cast(num, tf.float32) / tf.cast(denom, tf.float32))
+        # res_flat = tf.cast(res_flat, tf.float16)  # [unique_n*n, k]
         if tf.reduce_any(tf.math.is_nan(res_flat)) or tf.reduce_any(tf.math.is_inf(res_flat)):
-            log.debug(f'{w_flat=}')
-            log.debug(f'{s_flat=}')
-            log.debug(f'{num=}')
-            log.debug(f'{H_values=}')
+            is_nan_or_inf = tf.math.is_nan(res_flat) | tf.math.is_inf(res_flat)
+            indices = tf.where(is_nan_or_inf)[..., 0]
+            log.debug(f'{tf.gather(w_flat, indices)=}')
+            log.debug(f'{tf.gather(s_flat, indices)=}')
+            log.debug(f'{tf.gather(num, indices)=}')
+            log.debug(f'{tf.gather(H_values, indices)=}')
             raise ValueError('NAN when computing psi: all results')
 
         # Reshape back to original dimensions
