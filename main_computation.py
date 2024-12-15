@@ -10,15 +10,15 @@ Author:
 __updated__ = "11/27/24"
 -------------------------------------------------------
 """
-import argparse
+
 # Imports
+import argparse
 import os
 from src.dataset import load_data, process_data
 from src.likelihood import calculate_weights, LikelihoodConfig
 from src.HMCMC import MyHMCMC
 from src.logger import getlogger
 import atexit
-
 from src.reparameterizationVI import ReparameterizationVI
 
 # Constants
@@ -61,6 +61,17 @@ def parse_args():
         action='store_true',
         help='Load previous state of HMCMC if available'
     )
+    parser.add_argument(
+        '--load_path',
+        type=str,
+        help='Path to load previous state of Network formation model'
+    )
+    parser.add_argument(
+        '--state_type',
+        type=str,
+        choices=['hmcmc', 'vi'],
+        help='Whether the run that saved the state was HMCMC or VI'
+    )
 
     args = parser.parse_args()
 
@@ -74,6 +85,15 @@ def parse_args():
             log.info(f"Created directory {run_path}")
         except Exception as e:
             parser.error(f"Could not create directory {run_path}: {str(e)}")
+
+    if args.load:
+        load_path = args.load_path
+        assert os.path.isdir(load_path), f"Invalid load path: {load_path}"
+        assert args.state_type in ['hmcmc', 'vi'], f"Invalid state type: {args.state_type}"
+        # Check if state file exists
+        hmcmc_state = os.path.join(load_path, 'hmcmc_state.pkl')
+        vi_state = os.path.join(load_path, 'vi_state.pkl')
+        assert os.path.isfile(hmcmc_state) or os.path.isfile(vi_state), f"No state found in {load_path}"
 
     return args
 
@@ -95,8 +115,8 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
     s_dim = 1  # len(list(node_stats.values())[0])
     num_dims_theta = 2 * (x_dim + s_dim)
     num_dims_h = 1
-    lr = 1e-4
-    clip_val = 5
+    lr = 1e-3
+    clip_val = 10
 
     if args.algorithm == 'mle' or args.algorithm == 'hmcmc':
         # Define MLE optimizer object
@@ -113,15 +133,15 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
 
         if args.load:
             log.info("Loading previous state of HMCMC")
-            hmcmc_optimizer.load_state(args.run_path, config)
+            hmcmc_optimizer.load_state(args.load_path, config, state_type=args.state_type)
 
         if args.algorithm == 'mle':
             num_epochs = 10
             # Optimize the likelihood function with MLE
             log.info("Optimizing likelihood function with MLE")
-            losses = hmcmc_optimizer.optimize_w_mle(config, num_epochs=num_epochs)
+            losses = hmcmc_optimizer.optimize_w_mle(config, run_path=args.run_path, num_epochs=num_epochs)
             log.info(f"Log-likelihood: {losses[-1]}: MLE theta: {hmcmc_optimizer.param_state}")
-            hmcmc_optimizer.save_state('hmcmc_checkpoint_mle')
+            hmcmc_optimizer.save_state(args.run_path)
         else:
             num_results = 20
             num_burnin_steps = 100
@@ -132,7 +152,7 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
             log.info(f"Best parameter: {best_param}, Log-likelihood: {log_likelihood}")
             hmcmc_optimizer.save_state(args.run_path)
     elif args.algorithm == 'vi':
-        num_epochs = 10
+        num_epochs = 20
         # Define VI optimizer object
         vi_optimizer = ReparameterizationVI(
             num_dims_theta=num_dims_theta,
@@ -148,11 +168,11 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
 
         if args.load:
             log.info("Loading previous state of VI")
-            vi_optimizer.load_state(args.run_path, config)
+            vi_optimizer.load_state(args.load_path, config, state_type=args.state_type)
 
         # Optimize the likelihood function with VI
         log.info("Optimizing likelihood function with VI")
-        losses = vi_optimizer.optimize(config, optimize_alpha=True)
+        losses = vi_optimizer.optimize(config, run_path=args.run_path, optimize_alpha=True)
         params = vi_optimizer.variational_params['mean']
         log.info(f"Loss/ELBO: {-losses[-1]}: VI theta: {params}")
         vi_optimizer.save_state(args.run_path)

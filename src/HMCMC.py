@@ -186,13 +186,14 @@ class MyHMCMC:
         return best_sample, samples, log_probs
         # return samples, log_probs
 
-    def optimize_w_mle(self, likelihood_config: LikelihoodConfig, num_epochs: int, patience: int=3):
+    def optimize_w_mle(self, likelihood_config: LikelihoodConfig, num_epochs: int, run_path: str, patience: int = 3):
         """
         -------------------------------------------------------
         Optimizes parameters using maximum likelihood estimation
         -------------------------------------------------------
         Parameters:
           likelihood_config - data configuration for likelihood computation (LikelihoodConfig)
+          run_path - directory to save state files (str)
           num_epochs - number of training epochs (int > 0)
             patience - number of epochs to wait before early stopping (int > 0, default=3)
         Returns:
@@ -207,12 +208,19 @@ class MyHMCMC:
         optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
         ll_function = self.log_likelihood_wrapper(likelihood_config, use_mean=True)
         losses = []
+        best_loss = float('inf')
         prev_loss = float('inf')
         improve_count = 0
 
-        def train_step():
+        def train_step(best_loss = best_loss):
             with tf.GradientTape() as tape:
-                ll = -1*ll_function(self.param_state)
+                ll= ll_function(self.param_state)
+                ll *= -1  # Negative log likelihood
+
+            # Save best parameters
+            if ll < best_loss:
+                new_path = os.path.join(run_path, 'best_model')
+                self.save_state(new_path)
 
             # Get gradients
             grads = tape.gradient(ll, [self.param_state])
@@ -228,7 +236,12 @@ class MyHMCMC:
             return ll
 
         for epoch in range(num_epochs):
-            ll = train_step()
+            ll = train_step(best_loss)
+
+            # Save best loss
+            best_loss = ll if ll < best_loss else best_loss
+
+            # Early stopping
             if prev_loss - ll < 1e-6:
                 improve_count += 1
                 if improve_count >= patience:
@@ -284,7 +297,7 @@ class MyHMCMC:
             log.error(f'Failed to save HMCMC state to {state_path}: {str(e)}')
             raise
 
-    def load_state(self, directory: str, likelihood_config: LikelihoodConfig):
+    def load_state(self, directory: str, likelihood_config: LikelihoodConfig, state_type: str = 'hmcmc'):
         """
         -------------------------------------------------------
         Loads the HMCMC state from files in the given directory
@@ -292,12 +305,15 @@ class MyHMCMC:
         Parameters:
             directory - directory containing state files (str)
             likelihood_config - data configuration for likelihood computation (LikelihoodConfig)
+            state_type - type of state to load ('hmcmc' or 'vi', default='hmcmc')
         -------------------------------------------------------
         """
+        assert state_type in ['hmcmc', 'vi'], f"Invalid state type: {state_type}"
         directory = os.path.join(os.getcwd(), directory)
 
+        file_name = 'hmcmc_state.pkl' if state_type == 'hmcmc' else 'vi_state.pkl'
         # Load parameter state and other variables
-        state_path = os.path.join(directory, 'hmcmc_state.pkl')
+        state_path = os.path.join(directory, file_name)
         assert os.path.isfile(state_path), FileNotFoundError(f"No state file found at {state_path}")
 
         try:
@@ -305,16 +321,16 @@ class MyHMCMC:
                 state_dict = pickle.load(f)
 
             # Restore parameter state
-            if state_dict['param_state'] is not None:
+            if state_dict.get('param_state') is not None:
                 self.param_state = tf.Variable(state_dict['param_state'])
 
             # Restore other variables
-            self.current_ll = state_dict['current_ll']
-            self.num_dims_theta = state_dict['num_dims_theta']
-            self.num_dims_h = state_dict['num_dims_h']
-            self.num_chains = state_dict['num_chains']
-            self.learning_rate = state_dict['learning_rate']
-            self.clip_val = state_dict['clip_val']
+            self.current_ll = state_dict.get('current_ll', self.current_ll)
+            self.num_dims_theta = state_dict.get('num_dims_theta', self.num_dims_theta)
+            self.num_dims_h = state_dict.get('num_dims_h', self.num_dims_h)
+            self.num_chains = state_dict.get('num_chains', self.num_chains)
+            self.learning_rate = state_dict.get('learning_rate', self.learning_rate)
+            self.clip_val = state_dict.get('clip_val', self.clip_val)
 
             log.info(f'Successfully loaded HMCMC state from {directory}')
 

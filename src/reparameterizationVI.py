@@ -74,6 +74,7 @@ class ReparameterizationVI:
         self.num_samples = num_samples
         self.variational_params = None
         self.conjugate_prior_parameters = None
+        self.param_state = None
         self.current_H = None
         self.current_ll = None
         self.clip_val = clip_val
@@ -240,6 +241,7 @@ class ReparameterizationVI:
             optimize_alpha - whether to optimize the conjugate hyperparameters (bool)
         Returns:
             elbo - computed evidence lower bound (tf.Tensor)
+        ----------------------------------------------------
         """
         # Draws 1 sample from alpha
         alpha = self.sample_alpha() if optimize_alpha else None
@@ -251,7 +253,7 @@ class ReparameterizationVI:
                  tf.reduce_sum(self.variational_distribution(alpha=True).log_prob(alpha))) if optimize_alpha else (
                     tf.reduce_sum(self.variational_distribution().log_prob(theta)))
         # Compute log likelihood
-        log_likelihood = log_likelihood(theta)
+        log_likelihood= log_likelihood(theta)
         log.debug(f'{log_likelihood=}, {log_q=}')
         # Compute joint probability
         log_p_x_theta = log_likelihood + self.log_prior_theta(theta, None)
@@ -259,9 +261,13 @@ class ReparameterizationVI:
         # Compute ELBO
         elbo = log_p_x_theta - log_q
         log.debug(f"{elbo=}")
+
+        # set theta as param_state
+        self.param_state = theta  # if sample > 1, should be average
         return elbo
 
-    def optimize(self, likelihood_config: LikelihoodConfig, optimize_alpha: bool = False, patience: int = 3):
+    def optimize(self, likelihood_config: LikelihoodConfig, run_path: str,
+                 optimize_alpha: bool = False, patience: int = 3):
         """
         -------------------------------------------------------
         Optimizes the model parameters using the reparameterization
@@ -269,6 +275,7 @@ class ReparameterizationVI:
         -------------------------------------------------------
         Parameters:
             likelihood_config - configuration for likelihood computation (LikelihoodConfig)
+            run_path - directory to save state files (str)
             optimize_alpha - whether to optimize the conjugate hyperparameters (bool)
             patience - number of epochs to wait for improvement before stopping (int)
         Returns:
@@ -279,7 +286,9 @@ class ReparameterizationVI:
 
         losses = []
         prev_loss = float('inf')
+        best_loss = float('inf')
         not_improve_count = 0
+
         # Initialize parameters
         self._initialize_parameters()
         log_prob = self.log_likelihood_wrapper(likelihood_config, use_mean=True)
@@ -289,6 +298,13 @@ class ReparameterizationVI:
                 elbo = self.compute_elbo(log_prob, optimize_alpha)
                 loss = -elbo
             losses.append(loss)
+
+            # Save best model
+            if loss < best_loss:
+                best_loss = loss
+                new_path = os.path.join(run_path, 'best_model')
+                self.save_state(new_path)
+
             if optimize_alpha:
                 gradients = tape.gradient(loss, [self.variational_params['mean'],
                                                  self.variational_params['variance'],
@@ -321,7 +337,7 @@ class ReparameterizationVI:
                 log.info(f"Epoch: {epoch}, ELBO: {elbo}")
         return losses
 
-    def save_state(self, directory: str):
+    def save_state(self, directory: str, **kwargs):
         """
         -------------------------------------------------------
         Saves the current state of the VI including H values
@@ -349,7 +365,8 @@ class ReparameterizationVI:
             'num_dims_theta': self.num_dims_theta,
             'learning_rate': self.lr,
             'num_dims_h': self.num_dims_h,
-            'clip_val': self.clip_val
+            'clip_val': self.clip_val,
+            'param_state': self.param_state
         }
 
         state_path = os.path.join(directory, 'vi_state.pkl')
@@ -361,7 +378,7 @@ class ReparameterizationVI:
             log.error(f'Failed to save Variational Inference state to {state_path}: {str(e)}')
             raise
 
-    def load_state(self, directory: str, likelihood_config: LikelihoodConfig):
+    def load_state(self, directory: str, likelihood_config: LikelihoodConfig, state_type: str = 'vi'):
         """
         -------------------------------------------------------
         Loads the VI state from files in the given directory
@@ -369,12 +386,15 @@ class ReparameterizationVI:
         Parameters:
             directory - directory containing state files (str)
             likelihood_config - data configuration for likelihood computation (LikelihoodConfig)
+            state_type - type of state to load (str, default='vi')
         -------------------------------------------------------
         """
+        assert state_type in ['hmcmc', 'vi'], f"Invalid state type: {state_type}"
         directory = os.path.join(os.getcwd(), directory)
 
+        file_name = 'hmcmc_state.pkl' if state_type == 'hmcmc' else 'vi_state.pkl'
         # Load parameter state and other variables
-        state_path = os.path.join(directory, 'vi_state.pkl')
+        state_path = os.path.join(directory, file_name)
         assert os.path.isfile(state_path), FileNotFoundError(f"No state file found at {state_path}")
 
         try:
@@ -382,18 +402,20 @@ class ReparameterizationVI:
                 state_dict = pickle.load(f)
 
             # Restore parameter state
-            if state_dict['variational_params'] is not None:
+            if state_dict.get('variational_params') is not None:
                 self.variational_params = tf.Variable(state_dict['variational_params'])
 
             # Restore conjugate prior parameters
-            if state_dict['conjugate_prior_parameters'] is not None:
+            if state_dict.get('conjugate_prior_parameters') is not None:
                 self.conjugate_prior_parameters = tf.Variable(state_dict['conjugate_prior_parameters'])
 
             # Restore other variables
-            self.current_ll = state_dict['current_ll']
-            self.num_dims_theta = state_dict['num_dims_theta']
-            self.lr = state_dict['learning_rate']
-            self.clip_val = state_dict['clip_val']
+            self.current_ll = state_dict.get('current_ll', self.current_ll)
+            self.num_dims_theta = state_dict.get('num_dims_theta', self.num_dims_theta)
+            self.num_dims_h = state_dict.get('num_dims_h', self.num_dims_h)
+            self.lr = state_dict.get('learning_rate', self.lr)
+            self.clip_val = state_dict.get('clip_val', self.clip_val)
+            self.param_state = state_dict.get('param_state', self.param_state)
 
             log.info(f'Successfully loaded Variational Inference state from {directory}')
 
