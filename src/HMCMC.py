@@ -17,6 +17,7 @@ __updated__ = "11/27/24"
 import gc
 import os
 import pickle
+import random
 import tensorflow as tf
 import tensorflow_probability as tfp
 from src.H import VectorizedH
@@ -29,6 +30,7 @@ log = getlogger(__name__, loglevel)
 tf.config.run_functions_eagerly(True)
 SEED = int(os.getenv('RANDOMSEED', '4'))
 tf.random.set_seed(SEED)
+random.seed(SEED)
 parameter_initializer = tf.keras.initializers.RandomNormal(
     seed=SEED
 )
@@ -44,17 +46,19 @@ class MyHMCMC:
        num_dims_theta - dimension of parameter vector theta (int > 0)
        num_dims_h - dimension of H function output (int > 0, default=1)
        num_chains - number of parallel MCMC chains (int > 0, default=2)
+       leap_frog - number of leap frog steps for HMC (int >= 0, default=2)
        verbosity - whether to print detailed progress (bool, default=True)
        lr - learning rate for optimization (float > 0, default=1e-4)
        clip_val - gradient clipping threshold (float > 0, default=5)
     -------------------------------------------------------
     """
 
-    def __init__(self, num_dims_theta: int, num_dims_h: int = 1, num_chains: int = 2, verbosity: bool = True,
-                 lr: float = 1e-4, clip_val: float = 5):
+    def __init__(self, num_dims_theta: int, num_dims_h: int = 1, num_chains: int = 2, leap_frog: int = 2,
+                 verbosity: bool = True, lr: float = 1e-4, clip_val: float = 5):
         assert num_dims_theta > 0 and isinstance(num_dims_theta, int), "num_dims_theta must be a positive integer"
         assert num_dims_h > 0 and isinstance(num_dims_h, int), "num_dims_h must be a positive integer"
         assert num_chains > 0 and isinstance(num_chains, int), "num_chains must be a positive integer"
+        assert leap_frog >= 0 and isinstance(leap_frog, int), "leap_frog must be a positive integer"
         assert lr > 0, "learning rate must be a positive float"
         assert clip_val > 0, "clip_val must be a positive float"
 
@@ -67,6 +71,7 @@ class MyHMCMC:
         self.current_ll = None
         self.learning_rate = lr
         self.clip_val = clip_val
+        self.leap_frog = leap_frog
 
     def log_likelihood_wrapper(self, likelihood_config: LikelihoodConfig, use_mean: bool = False) -> callable:
         """
@@ -99,18 +104,20 @@ class MyHMCMC:
                 log.debug(f"Log Likelihood: {ll}")
                 log.debug(f"Theta: {theta}")
                 log.debug(f"H: {repr(H)}")
-            return ll 
+            return ll
 
         return log_prob
 
     @tf.function
-    def run_chain(self, likelihood_config: LikelihoodConfig, burn_in_steps=100, num_results=20):
+    def run_chain(self, likelihood_config: LikelihoodConfig, seed: int, burn_in_steps: int = 100,
+                  num_results: int = 20):
         """
         -------------------------------------------------------
         Runs Hamiltonian Monte Carlo sampling chain
         -------------------------------------------------------
         Parameters:
            likelihood_config - data configuration for likelihood computation (LikelihoodConfig)
+           seed - random seed for reproducibility (int)
            burn_in_steps - number of burn-in steps (int > 0, default=100)
            num_results - number of samples to collect (int > 0, default=20)
         Returns:
@@ -126,8 +133,10 @@ class MyHMCMC:
         adaptive_hmc = tfp.mcmc.SimpleStepSizeAdaptation(
             tfp.mcmc.HamiltonianMonteCarlo(
                 target_log_prob_fn=self.log_likelihood_wrapper(likelihood_config, use_mean=True),
-                num_leapfrog_steps=5,
-                step_size=step_size),
+                num_leapfrog_steps=self.leap_frog,
+                step_size=step_size,
+                state_gradients_are_stopped=True
+            ),
             num_adaptation_steps=int(burn_in_steps * 0.8))
 
         # Run the chain
@@ -139,8 +148,11 @@ class MyHMCMC:
             kernel=adaptive_hmc,
             parallel_iterations=1,
             trace_fn=None,  # ,lambda _, pkr: [pkr],
-            return_final_kernel_results=False)
+            return_final_kernel_results=False,
+            seed=seed
+        )
 
+        log.info(f'Chain converged after {burn_in_steps} steps: {adaptive_hmc.is_calibrated}')
         return samples  # , final_kernel_results
 
     @tf.function
@@ -169,9 +181,10 @@ class MyHMCMC:
 
         # Run the HMC Chain
         samples = []
+        chain_seed = random.choices(range(self.num_chains*100), k=self.num_chains)
         # samples, final_kernel_results = self.run_chain(node_attrs, node_stats, weights, burn_in_steps, num_results)
         for i in range(self.num_chains):
-            sample = self.run_chain(likelihood_config, burn_in_steps, num_results//self.num_chains)
+            sample = self.run_chain(likelihood_config, chain_seed[i], burn_in_steps, num_results // self.num_chains)
             samples.append(sample)
 
             # Clear memory
@@ -213,7 +226,8 @@ class MyHMCMC:
         assert num_epochs >= patience >= 0, "patience must be a positive integer and less than epochs"
 
         log.info("Optimizing with MLE")
-        self.param_state = tf.Variable(parameter_initializer([self.num_dims_theta], dtype=tf.float32), trainable=True) if self.param_state is None else self.param_state
+        self.param_state = tf.Variable(parameter_initializer([self.num_dims_theta], dtype=tf.float32),
+                                       trainable=True) if self.param_state is None else self.param_state
         optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
         ll_function = self.log_likelihood_wrapper(likelihood_config, use_mean=True)
         losses = []
@@ -221,9 +235,9 @@ class MyHMCMC:
         prev_loss = float('inf')
         improve_count = 0
 
-        def train_step(best_loss = best_loss):
+        def train_step(best_loss=best_loss):
             with tf.GradientTape() as tape:
-                ll= ll_function(self.param_state)
+                ll = ll_function(self.param_state)
                 ll *= -1  # Negative log likelihood
 
             # Save best parameters
@@ -298,7 +312,8 @@ class MyHMCMC:
             'num_dims_h': self.num_dims_h,
             'num_chains': self.num_chains,
             'learning_rate': self.learning_rate,
-            'clip_val': self.clip_val
+            'clip_val': self.clip_val,
+            'leap_frog': self.leap_frog
         }
 
         state_path = os.path.join(directory, 'hmcmc_state.pkl')
@@ -344,6 +359,7 @@ class MyHMCMC:
             self.num_chains = state_dict.get('num_chains', self.num_chains)
             self.learning_rate = state_dict.get('learning_rate', self.learning_rate)
             self.clip_val = state_dict.get('clip_val', self.clip_val)
+            self.leap_frog = state_dict.get('leap_frog', self.leap_frog)
 
             log.info(f'Successfully loaded HMCMC state from {directory}')
 

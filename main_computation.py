@@ -20,82 +20,11 @@ from src.HMCMC import MyHMCMC
 from src.logger import getlogger
 import atexit
 from src.reparameterizationVI import ReparameterizationVI
+from src.parser import parse_args, EXIT_CHECKPOINT
 
 # Constants
 loglevel = os.getenv('LOGLEVEL', 'INFO').lower()
 log = getlogger(__name__, loglevel)
-EXIT_CHECKPOINT = 'checkpoint_exit'
-
-
-def parse_args():
-    """
-    -------------------------------------------------------
-    Parse and validate command line arguments
-    -------------------------------------------------------
-    Returns:
-       args - validated command line arguments (argparse.Namespace)
-    -------------------------------------------------------
-    """
-    parser = argparse.ArgumentParser(
-        description='Network Formation Model Estimation',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-
-    parser.add_argument(
-        '--algorithm',
-        type=str,
-        choices=['mle', 'hmcmc', 'vi'],
-        required=True,
-        help='Estimation algorithm to use (mle, hmcmc, or vi)'
-    )
-
-    parser.add_argument(
-        '--run_path',
-        type=str,
-        required=True,
-        help='Path to store saved models and checkpoints'
-    )
-
-    parser.add_argument(
-        '--load',
-        action='store_true',
-        help='Load previous state of HMCMC if available'
-    )
-    parser.add_argument(
-        '--load_path',
-        type=str,
-        help='Path to load previous state of Network formation model'
-    )
-    parser.add_argument(
-        '--state_type',
-        type=str,
-        choices=['hmcmc', 'vi'],
-        help='Whether the run that saved the state was HMCMC or VI'
-    )
-
-    args = parser.parse_args()
-
-    # Validate run_path
-    run_path = args.run_path
-    exit_checkpoint = os.path.join(run_path, EXIT_CHECKPOINT)
-    if not os.path.isdir(run_path) or not os.path.isdir(exit_checkpoint):
-        try:
-            os.makedirs(run_path, exist_ok=True)
-            os.makedirs(exit_checkpoint, exist_ok=True)
-            log.info(f"Created directory {run_path}")
-        except Exception as e:
-            parser.error(f"Could not create directory {run_path}: {str(e)}")
-
-    if args.load:
-        load_path = args.load_path
-        assert os.path.isdir(load_path), f"Invalid load path: {load_path}"
-        assert args.state_type in ['hmcmc', 'vi'], f"Invalid state type: {args.state_type}"
-        # Check if state file exists
-        hmcmc_state = os.path.join(load_path, 'hmcmc_state.pkl')
-        vi_state = os.path.join(load_path, 'vi_state.pkl')
-        assert os.path.isfile(hmcmc_state) or os.path.isfile(vi_state), f"No state found in {load_path}"
-
-    return args
 
 
 def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
@@ -115,15 +44,15 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
     s_dim = 1  # len(list(node_stats.values())[0])
     num_dims_theta = 2 * (x_dim + s_dim)
     num_dims_h = 1
-    lr = 1e-3
-    clip_val = 10
+    lr = args.learning_rate
+    clip_val = args.clip_value
 
     if args.algorithm == 'mle' or args.algorithm == 'hmcmc':
         # Define MLE optimizer object
         hmcmc_optimizer = MyHMCMC(
             num_dims_theta=num_dims_theta,
             num_dims_h=num_dims_h,
-            num_chains=3,
+            num_chains=args.num_chains,
             verbosity=True,
             lr=lr,
             clip_val=clip_val
@@ -136,15 +65,15 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
             hmcmc_optimizer.load_state(args.load_path, config, state_type=args.state_type)
 
         if args.algorithm == 'mle':
-            num_epochs = 10
+            num_epochs = args.maximum_epochs
             # Optimize the likelihood function with MLE
             log.info("Optimizing likelihood function with MLE")
             losses = hmcmc_optimizer.optimize_w_mle(config, run_path=args.run_path, num_epochs=num_epochs)
             log.info(f"Negative Log-likelihood: {losses[-1]}: MLE theta: {hmcmc_optimizer.param_state}")
             hmcmc_optimizer.save_state(args.run_path)
         else:
-            num_results = 10
-            num_burnin_steps = 5
+            num_results = args.num_results
+            num_burnin_steps = args.burn_in
             # Run HMC sampling
             best_param, all_params, log_likelihood = hmcmc_optimizer.optimize(
                 config, num_results=num_results, burn_in_steps=num_burnin_steps
@@ -152,7 +81,7 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
             log.info(f"Best parameter: {best_param}, Log-likelihood: {log_likelihood}")
             hmcmc_optimizer.save_state(args.run_path)
     elif args.algorithm == 'vi':
-        num_epochs = 20
+        num_epochs = args.maximum_epochs
         # Define VI optimizer object
         vi_optimizer = ReparameterizationVI(
             num_dims_theta=num_dims_theta,

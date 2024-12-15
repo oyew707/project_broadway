@@ -24,7 +24,7 @@ from src.logger import getlogger
 
 # Constants
 loglevel = os.getenv('LOGLEVEL', 'INFO').lower()
-log = getlogger(__name__, 'debug')
+log = getlogger(__name__, loglevel)
 tf.config.run_functions_eagerly(True)
 SEED = int(os.getenv('RANDOMSEED', '4'))
 tf.random.set_seed(SEED)
