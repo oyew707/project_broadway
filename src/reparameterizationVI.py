@@ -333,6 +333,9 @@ class ReparameterizationVI:
             else:
                 not_improve_count = 0
             prev_loss = loss
+            # Clear memory
+            tf.keras.backend.clear_session()
+            # Print progress
             if self.verbose:
                 log.info(f"Epoch: {epoch}, ELBO: {elbo}")
         return losses

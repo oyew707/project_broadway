@@ -66,8 +66,8 @@ class VectorizedPsi(tf.Module):
         if tf.reduce_any(tf.math.is_nan(num)) or tf.reduce_any(tf.math.is_inf(num)):
             is_nan_or_inf = tf.math.is_nan(num) | tf.math.is_inf(num)
             indices = tf.where(is_nan_or_inf)[..., 0]
-            log.debug(f' {tf.gather(V_flat, indices)=}')
-            log.debug(f'{tf.gather(num, indices)=}')
+            log.error(f' {tf.gather(V_flat, indices)=}')
+            log.error(f'{tf.gather(num, indices)=}')
             raise ValueError('NAN when computing psi: numerator')
 
         # Compute denominator
@@ -83,10 +83,10 @@ class VectorizedPsi(tf.Module):
         if tf.reduce_any(tf.math.is_nan(res_flat)) or tf.reduce_any(tf.math.is_inf(res_flat)):
             is_nan_or_inf = tf.math.is_nan(res_flat) | tf.math.is_inf(res_flat)
             indices = tf.where(is_nan_or_inf)[..., 0]
-            log.debug(f'{tf.gather(w_flat, indices)=}')
-            log.debug(f'{tf.gather(s_flat, indices)=}')
-            log.debug(f'{tf.gather(num, indices)=}')
-            log.debug(f'{tf.gather(H_values, indices)=}')
+            log.error(f'{tf.gather(w_flat, indices)=}')
+            log.error(f'{tf.gather(s_flat, indices)=}')
+            log.error(f'{tf.gather(num, indices)=}')
+            log.error(f'{tf.gather(H_values, indices)=}')
             raise ValueError('NAN when computing psi: all results')
 
         # Reshape back to original dimensions

@@ -103,6 +103,7 @@ class MyHMCMC:
 
         return log_prob
 
+    @tf.function
     def run_chain(self, likelihood_config: LikelihoodConfig, burn_in_steps=100, num_results=20):
         """
         -------------------------------------------------------
@@ -124,7 +125,7 @@ class MyHMCMC:
         step_size = tf.fill([self.num_dims_theta], self.learning_rate)  # [0.1, 0.1, ...]
         adaptive_hmc = tfp.mcmc.SimpleStepSizeAdaptation(
             tfp.mcmc.HamiltonianMonteCarlo(
-                target_log_prob_fn=self.log_likelihood_wrapper(likelihood_config),
+                target_log_prob_fn=self.log_likelihood_wrapper(likelihood_config, use_mean=True),
                 num_leapfrog_steps=5,
                 step_size=step_size),
             num_adaptation_steps=int(burn_in_steps * 0.8))
@@ -136,11 +137,13 @@ class MyHMCMC:
             num_burnin_steps=burn_in_steps,
             current_state=self.param_state,
             kernel=adaptive_hmc,
+            parallel_iterations=1,
             trace_fn=None,  # ,lambda _, pkr: [pkr],
             return_final_kernel_results=False)
 
         return samples  # , final_kernel_results
 
+    @tf.function
     def optimize(self, likelihood_config: LikelihoodConfig, burn_in_steps=100, num_results=20):
         """
         -------------------------------------------------------
@@ -165,13 +168,19 @@ class MyHMCMC:
             self.param_state = tf.abs(parameter_initializer([self.num_dims_theta], dtype=tf.float32))
 
         # Run the HMC Chain
+        samples = []
         # samples, final_kernel_results = self.run_chain(node_attrs, node_stats, weights, burn_in_steps, num_results)
-        samples = self.run_chain(likelihood_config, burn_in_steps, num_results)
+        for i in range(self.num_chains):
+            sample = self.run_chain(likelihood_config, burn_in_steps, num_results//self.num_chains)
+            samples.append(sample)
+
+            # Clear memory
+            tf.keras.backend.clear_session()
         # log probability for sampled params
         log_probs = []
         for theta_sample in samples:
             ll, _ = log_likelihood_optimized(
-                theta_sample, likelihood_config, H=self.current_H
+                theta_sample, likelihood_config, H=self.current_H, use_mean=True
             )
             log_probs.append(ll)
 
@@ -250,7 +259,11 @@ class MyHMCMC:
             else:
                 improve_count = 0
             prev_loss = ll
+            # Clear memory
+            tf.keras.backend.clear_session()
             gc.collect()
+
+            # Store loss
             losses.append(ll)
             log.info(f"Epoch {epoch + 1}, Log Likelihood: {-1 * ll}")
             log.debug(f"Theta: {self.param_state}")

@@ -123,7 +123,7 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
         hmcmc_optimizer = MyHMCMC(
             num_dims_theta=num_dims_theta,
             num_dims_h=num_dims_h,
-            num_chains=1,
+            num_chains=3,
             verbosity=True,
             lr=lr,
             clip_val=clip_val
@@ -140,11 +140,11 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
             # Optimize the likelihood function with MLE
             log.info("Optimizing likelihood function with MLE")
             losses = hmcmc_optimizer.optimize_w_mle(config, run_path=args.run_path, num_epochs=num_epochs)
-            log.info(f"Log-likelihood: {losses[-1]}: MLE theta: {hmcmc_optimizer.param_state}")
+            log.info(f"Negative Log-likelihood: {losses[-1]}: MLE theta: {hmcmc_optimizer.param_state}")
             hmcmc_optimizer.save_state(args.run_path)
         else:
-            num_results = 20
-            num_burnin_steps = 100
+            num_results = 10
+            num_burnin_steps = 5
             # Run HMC sampling
             best_param, all_params, log_likelihood = hmcmc_optimizer.optimize(
                 config, num_results=num_results, burn_in_steps=num_burnin_steps
@@ -174,7 +174,7 @@ def run_estimation(args: argparse.Namespace, config: LikelihoodConfig):
         log.info("Optimizing likelihood function with VI")
         losses = vi_optimizer.optimize(config, run_path=args.run_path, optimize_alpha=True)
         params = vi_optimizer.variational_params['mean']
-        log.info(f"Loss/ELBO: {-losses[-1]}: VI theta: {params}")
+        log.info(f"ELBO: {-losses[-1]}: VI theta: {params}")
         vi_optimizer.save_state(args.run_path)
     else:
         log.error(f"Invalid algorithm: {args.algorithm}")
