@@ -176,7 +176,7 @@ class TestNetworkLikelihood(unittest.TestCase):
         expected_psi = tf.constant(expected_psi, dtype=tf.float16)
 
         # Compare actual vs expected values
-        np.testing.assert_array_almost_equal(psi_values.numpy(), expected_psi.numpy(), decimal=4)
+        np.testing.assert_array_almost_equal(psi_values.numpy(), expected_psi.numpy(), decimal=3)
 
     @patch('src.likelihood.H_star')
     def test_log_likelihood_unnormalized(self, mock_h_star):

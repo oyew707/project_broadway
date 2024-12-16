@@ -38,9 +38,13 @@ def sample_graph(likelihood_config: LikelihoodConfig, theta: tf.Tensor, H: Vecto
         theta - optimized/sampled model parameters (tf.Tensor)
         H - vectorized H function (VectorizedH)
     Returns:
-        likely_graph - adjacency matrix of the likely network (tf.Tensor)
+        likely_graph - adjacency matrix of the likely network (tf.Tensor [num_nodes, num_nodes])
     -------------------------------------------------------
     """
+    assert isinstance(likelihood_config, LikelihoodConfig), "likelihood_config must be LikelihoodConfig instance"
+    assert isinstance(theta, tf.Tensor), "theta must be a Tensor"
+    assert isinstance(H, VectorizedH), "H must be a VectorizedH instance"
+
     # Create tensors for node attributes and statistics
     x_i = tf.convert_to_tensor(np.array([likelihood_config.node_attrs[i] for i in likelihood_config.node_attrs.keys()]), dtype=tf.float16)
     x_j = tf.identity(x_i)
@@ -65,6 +69,8 @@ def sample_graph(likelihood_config: LikelihoodConfig, theta: tf.Tensor, H: Vecto
     log.debug(f'{V.shape=} {H_i.shape=} {H_j.shape=}')
     # Sample edge with probability proportional to exp(V)/(1+H_i)(1+H_j)
     p_ij = tf.exp(V) / (1 + H_i) / (1 + H_j)
+    # clip probabilities to avoid numerical issues
+    p_ij = tf.clip_by_value(p_ij, 1e-7, 1.0)
 
     L = tf.random.stateless_bernoulli(SEED, probs=p_ij, dtype=tf.int32)
     # Make symmetric by taking upper triangle
@@ -130,12 +136,15 @@ def sample_limiting_distribution(likelihood_config: LikelihoodConfig, theta: tf.
     -------------------------------------------------------
     Parameters:
        likelihood_config - configuration for likelihood computation (LikelihoodConfig)
-        theta - optimized/sampled model parameters (tf.Tensor)
+        theta - optimized/sampled model parameters (tf.Tensor [num_dims_theta])
         H - vectorized H function (VectorizedH)
     Returns:
-       likely_graph - adjacency matrix of the likely network (tf.Tensor)
+       likely_graph - adjacency matrix of the likely network (tf.Tensor [num_nodes, num_nodes])
     -------------------------------------------------------
     """
+    assert isinstance(likelihood_config, LikelihoodConfig), "likelihood_config must be LikelihoodConfig instance"
+    assert isinstance(theta, tf.Tensor), "theta must be a Tensor"
+    assert isinstance(H, VectorizedH), "H must be a VectorizedH instance"
     # Create tensors for node attributes and statistics
     x_i = tf.convert_to_tensor(np.array([likelihood_config.node_attrs[i] for i in likelihood_config.node_attrs.keys()]), dtype=tf.float16)
     x_j = tf.identity(x_i)
@@ -143,6 +152,8 @@ def sample_limiting_distribution(likelihood_config: LikelihoodConfig, theta: tf.
     s_j = tf.identity(s_i)
 
     p_ij = limiting_link_intensity(x_i, x_j, s_i, s_j, H, theta)
+    # clip probabilities to avoid numerical issues
+    p_ij = tf.clip_by_value(p_ij, 1e-7, 1.0)
 
     L = tf.random.stateless_bernoulli(SEED, probs=p_ij, dtype=tf.int32)
     # Make symmetric by taking upper triangle

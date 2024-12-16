@@ -97,7 +97,7 @@ class TestOptimization(unittest.TestCase):
             clip_val=1.0  # Tighter gradient clipping
         )
         init_state = tf.random.normal([num_dims_theta], mean=0.0, stddev=0.001)
-        hmcmc.param_state = init_state
+        hmcmc.param_state = tf.Variable(init_state)
 
         # Act
         best_sample, samples, log_probs = hmcmc.optimize(
@@ -122,6 +122,8 @@ class TestOptimization(unittest.TestCase):
             lr=0.001,
             clip_val=5.0
         )
+        init_state = tf.random.normal([3], mean=0.0, stddev=0.001)
+        hmcmc.param_state = tf.Variable(init_state)
 
         # Act
         _ = hmcmc.optimize_w_mle(
@@ -146,10 +148,15 @@ class TestOptimization(unittest.TestCase):
             num_dims_theta=3,
             verbose=True,
             lr=1e-3,
-            clip_val=1.0,
-            num_epochs=200,
+            clip_val=10.0,
+            num_epochs=300,
             num_samples=1
         )
+        init_state = tf.random.normal([3], mean=0.0, stddev=0.001)
+        vi.variational_params = {
+            'mean': tf.Variable(init_state),
+            'variance': tf.Variable(tf.ones_like(init_state)*0.5)
+        }
 
         # Act
         _ = vi.optimize(

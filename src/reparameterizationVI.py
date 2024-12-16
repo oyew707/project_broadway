@@ -118,28 +118,30 @@ class ReparameterizationVI:
         parameters
         -------------------------------------------------------
         """
-        self.variational_params = {
-            'mean': tf.Variable(
-                initial_value=mean_parameter_initializer(shape=[self.num_dims_theta], dtype=tf.float32),
-                trainable=True
-            ),
-            'variance': tf.Variable(
-                initial_value=tf.abs(var_parameter_initializer(shape=[self.num_dims_theta], dtype=tf.float32)),
-                dtype=tf.float32,
-                name='variance',
-                trainable=True
-            )
-        }
-        self.conjugate_prior_parameters = {
-            'alpha': tf.Variable(
-                initial_value=tf.ones(shape=[self.num_dims_theta], dtype=tf.float32),
-                trainable=True
-            ),
-            'beta': tf.Variable(
-                initial_value=tf.ones(shape=[self.num_dims_theta], dtype=tf.float32),
-                trainable=True
-            )
-        }
+        if self.variational_params is None:
+            self.variational_params = {
+                'mean': tf.Variable(
+                    initial_value=mean_parameter_initializer(shape=[self.num_dims_theta], dtype=tf.float32),
+                    trainable=True
+                ),
+                'variance': tf.Variable(
+                    initial_value=tf.abs(var_parameter_initializer(shape=[self.num_dims_theta], dtype=tf.float32)),
+                    dtype=tf.float32,
+                    name='variance',
+                    trainable=True
+                )
+            }
+        if self.conjugate_prior_parameters is None:
+            self.conjugate_prior_parameters = {
+                'alpha': tf.Variable(
+                    initial_value=tf.ones(shape=[self.num_dims_theta], dtype=tf.float32),
+                    trainable=True
+                ),
+                'beta': tf.Variable(
+                    initial_value=tf.ones(shape=[self.num_dims_theta], dtype=tf.float32),
+                    trainable=True
+                )
+            }
 
     def variational_distribution(self, **kwargs):
         """
