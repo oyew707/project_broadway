@@ -11,7 +11,7 @@ __updated__ = "11/27/24"
 # Imports
 import os
 from collections import defaultdict
-from typing import Tuple
+from typing import Tuple, Dict, List, Any, Set
 import pandas as pd
 from src.logger import getlogger
 
@@ -59,7 +59,7 @@ def load_data(data_path: str = './data') -> Tuple[pd.DataFrame, pd.DataFrame, pd
 
 
 def process_data(node_data: pd.DataFrame, edge_data: pd.DataFrame, committee_data: pd.DataFrame) -> Tuple[
-        dict, list, dict, dict]:
+        Dict[int, List[float]], List[Dict[str, Any]], Dict[int, Dict[str, int]], Dict[int, Set[int]]]:
     """
     -------------------------------------------------------
     create node attributes, transaction records, network statistics, and edge connections for the NYSE sponsor network
@@ -80,6 +80,13 @@ def process_data(node_data: pd.DataFrame, edge_data: pd.DataFrame, committee_dat
         edges - dictionary mapping node IDs to their connected nodes (dict)
     -------------------------------------------------------
     """
+    # Check that all referenced IDs exist in node_data
+    all_ids = set(node_data['node_id'])
+    buyer_ids = set(edge_data['buyer_id'])
+    sponsor_ids = set(edge_data['sponsor1_id']) | set(edge_data['sponsor2_id'])
+    assert buyer_ids.issubset(all_ids), "Found buyer IDs not in node data"
+    assert sponsor_ids.issubset(all_ids), "Found sponsor IDs not in node data"
+
     log.info("Processing data")
     # Convert ethnicity to one-hot encoding
     node_data = pd.get_dummies(data=node_data, columns=['ethnicity'], dummy_na=True, prefix='ethnicity',
@@ -93,7 +100,7 @@ def process_data(node_data: pd.DataFrame, edge_data: pd.DataFrame, committee_dat
 
     # Initialize network statistics
     network_stats = {node_id: {'degree': 0, 'sponsor_count': 0} for node_id in node_attrs}
-    edges = defaultdict(set)
+    edges = {node_id: set() for node_id in node_attrs}
 
     log.debug("Processing edge data")
     transactions = []
@@ -112,6 +119,8 @@ def process_data(node_data: pd.DataFrame, edge_data: pd.DataFrame, committee_dat
         network_stats[sponsor2_id]['sponsor_count'] += 1
         edges[buyer_id].add(sponsor1_id)
         edges[buyer_id].add(sponsor2_id)
+        edges[sponsor1_id].add(buyer_id)
+        edges[sponsor2_id].add(buyer_id)
 
         committee_members = committee_data[(committee_data['buyer_id'] == buyer_id) &
                                            (committee_data['year'] == year)]['committee_id'].tolist()

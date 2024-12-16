@@ -4,3 +4,4 @@ pandas>=2.2.3
 tensorflow-probability>=0.24.0
 tf-keras>=2.17.0rc0
 tf-keras-nightly>=2.17.0rc0
+dsd>=0.0.3
