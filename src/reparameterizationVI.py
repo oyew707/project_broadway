@@ -406,11 +406,11 @@ class ReparameterizationVI:
 
             # Restore parameter state
             if state_dict.get('variational_params') is not None:
-                self.variational_params = tf.Variable(state_dict['variational_params'])
+                self.variational_params = state_dict['variational_params']
 
             # Restore conjugate prior parameters
             if state_dict.get('conjugate_prior_parameters') is not None:
-                self.conjugate_prior_parameters = tf.Variable(state_dict['conjugate_prior_parameters'])
+                self.conjugate_prior_parameters = state_dict['conjugate_prior_parameters']
 
             # Restore other variables
             self.current_ll = state_dict.get('current_ll', self.current_ll)

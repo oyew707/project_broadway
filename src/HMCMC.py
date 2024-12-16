@@ -152,7 +152,18 @@ class MyHMCMC:
             seed=seed
         )
 
-        log.info(f'Chain converged after {burn_in_steps} steps: {adaptive_hmc.is_calibrated}')
+        # Compute Gelman-Rubin statistic
+        r_hat = tfp.mcmc.potential_scale_reduction(tf.stack(samples))
+
+        # Compute effective sample size
+        ess = tfp.mcmc.effective_sample_size(tf.stack(samples))
+
+        log.info(f"R-hat statistic: {r_hat}")
+        log.info(f"Effective sample size: {ess}")
+
+        # Consider chain converged if R-hat < 1.1 for all parameters
+        is_converged = tf.reduce_all(r_hat < 1.1)
+        log.info(f"Chain convergence after {burn_in_steps} steps: {is_converged}")
         return samples  # , final_kernel_results
 
     @tf.function
@@ -185,7 +196,7 @@ class MyHMCMC:
         # samples, final_kernel_results = self.run_chain(node_attrs, node_stats, weights, burn_in_steps, num_results)
         for i in range(self.num_chains):
             sample = self.run_chain(likelihood_config, chain_seed[i], burn_in_steps, num_results // self.num_chains)
-            samples.append(sample)
+            samples.extend(sample.numpy().tolist())
 
             # Clear memory
             tf.keras.backend.clear_session()
