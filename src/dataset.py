@@ -87,7 +87,9 @@ def process_data(node_data: pd.DataFrame, edge_data: pd.DataFrame, committee_dat
     # If ever_committee and ever_sponsor are missing, fill with 0 (False)
     node_data[['ever_committee', 'ever_sponsor']] = node_data[['ever_committee', 'ever_sponsor']].fillna(0)
     # Set node_id as index
-    node_attrs = node_data.set_index('node_id').drop(columns=['name']).T.to_dict('list')
+    node_attrs = node_data.set_index('node_id').drop(columns=['name'])
+    log.info(f"Node attributes: {node_attrs.columns}")
+    node_attrs = node_attrs.T.to_dict('list')
 
     # Initialize network statistics
     network_stats = {node_id: {'degree': 0, 'sponsor_count': 0} for node_id in node_attrs}

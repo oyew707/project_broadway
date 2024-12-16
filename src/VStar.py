@@ -62,7 +62,8 @@ class VectorizedVStar(tf.Module):
         n = tf.shape(xj)[0]
 
         # Reshape theta to [param_dim, 1] for matmul
-        theta_reshaped = tf.convert_to_tensor(theta, dtype=tf.float16)[:, tf.newaxis]
+        theta_reshaped = tf.convert_to_tensor(theta, dtype=tf.float16)[:, tf.newaxis] \
+            if not isinstance(theta, tf.Tensor) else theta[:, tf.newaxis]
 
         # Concatenate inputs along the last dimension
         if len(xi.shape) == 3:  # Input should be [batch_size, x_dim]'

@@ -72,7 +72,9 @@ def sample_graph(likelihood_config: LikelihoodConfig, theta: tf.Tensor, H: Vecto
     # clip probabilities to avoid numerical issues
     p_ij = tf.clip_by_value(p_ij, 1e-7, 1.0)
 
-    L = tf.random.stateless_bernoulli(SEED, probs=p_ij, dtype=tf.int32)
+    # L = tf.random.stateless_bernoulli(SEED, probs=p_ij, dtype=tf.int32)
+    L = tf.random.stateless_uniform(p_ij.shape, seed=[SEED, SEED], minval=0, maxval=1, dtype=tf.float16) < p_ij
+    L = tf.cast(L, tf.int32)
     # Make symmetric by taking upper triangle
     L_upper = tf.linalg.band_part(L, 0, -1)  # Upper triangle including diagonal
     L_no_diag = L_upper - tf.linalg.diag(tf.linalg.diag_part(L_upper))  # Remove diagonal
@@ -155,7 +157,9 @@ def sample_limiting_distribution(likelihood_config: LikelihoodConfig, theta: tf.
     # clip probabilities to avoid numerical issues
     p_ij = tf.clip_by_value(p_ij, 1e-7, 1.0)
 
-    L = tf.random.stateless_bernoulli(SEED, probs=p_ij, dtype=tf.int32)
+    # L = tf.random.stateless_bernoulli(SEED, probs=p_ij, dtype=tf.int32)
+    L = tf.random.stateless_uniform(p_ij.shape, seed=[SEED, SEED], minval=0, maxval=1, dtype=tf.float16) < p_ij
+    L = tf.cast(L, tf.int32)
     # Make symmetric by taking upper triangle
     L_upper = tf.linalg.band_part(L, 0, -1)  # Upper triangle including diagonal
     L_no_diag = L_upper - tf.linalg.diag(tf.linalg.diag_part(L_upper))  # Remove diagonal
