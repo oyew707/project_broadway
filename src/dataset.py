@@ -10,8 +10,11 @@ __updated__ = "11/27/24"
 
 # Imports
 import os
+import networkx as nx
+import dsd
 from collections import defaultdict
-from typing import Tuple, Dict, List, Any, Set
+from src.likelihood import LikelihoodConfig
+from typing import Tuple, Dict, List, Any, Set, Optional
 import pandas as pd
 from src.logger import getlogger
 
@@ -137,3 +140,85 @@ def process_data(node_data: pd.DataFrame, edge_data: pd.DataFrame, committee_dat
     log.info("Data processed successfully")
 
     return node_attrs, transactions, network_stats, edges
+
+
+def most_connected_subgraph(likelihood_config: LikelihoodConfig) -> nx.Graph:
+    """
+    -------------------------------------------------------
+    Finds the most connected subgraph in the network.
+    -------------------------------------------------------
+    Parameters:
+       likelihood_config - Original configuration with full network data (LikelihoodConfig)
+    Returns:
+         subgraph - Most connected subgraph (nx.Graph)
+    -------------------------------------------------------
+    """
+    # Convert the graph to networkx
+    G = nx.Graph()
+    for node, neighbors in likelihood_config.edges.items():
+        for neighbor in neighbors:
+            G.add_edge(node, neighbor)
+
+    log.info(f'Extracting most connected subgraph')
+    log.debug(f'Original graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges')
+    # Find the most connected subgraph
+    subgraph = max(nx.connected_components(G), key=len)
+    log.info(f'Extracted subgraph with {len(subgraph)} nodes')
+
+    return G.subgraph(subgraph)
+
+
+def densest_subgraph(likelihood_config: Optional[LikelihoodConfig], graph: Optional[nx.Graph]) -> nx.Graph:
+    """
+    -------------------------------------------------------
+    Finds the densest subgraph in the network.
+    -------------------------------------------------------
+    Parameters:
+       likelihood_config - Original configuration with full network data (LikelihoodConfig)
+       graph - Networkx graph to find the densest subgraph in (nx.Graph)
+    Returns:
+         subgraph - densest subgraph (nx.Graph)
+    -------------------------------------------------------
+    """
+    assert (likelihood_config is not None) or (graph is not None), "Either likelihood_config or G must be provided"
+
+    if graph is None:
+        # Convert the graph to networkx
+        G = nx.Graph()
+        for node, neighbors in likelihood_config.edges.items():
+            for neighbor in neighbors:
+                G.add_edge(node, neighbor)
+    else:
+        # Convert the graph to networkx
+        G = graph.copy()
+
+    log.info(f'Extracting densest subgraph')
+    # Find the densest subgraph
+    subgraph, density = dsd.exact_densest(G)
+    log.info(f'Extracted subgraph with Density: {density} and with {len(subgraph)} nodes')
+
+    return G.subgraph(subgraph)
+
+
+def graph_to_config(graph: nx.Graph, likelihood_config) -> LikelihoodConfig:
+    """
+    -------------------------------------------------------
+    Converts a graph to a configuration object.
+    -------------------------------------------------------
+    Parameters:
+         graph - Graph to convert (nx.Graph)
+    Returns:
+       subgraph_config - Configuration object (LikelihoodConfig)
+    -------------------------------------------------------
+    """
+    # Create new config with only nodes in largest component
+    subgraph_edges = {n: set(graph.neighbors(n)) for n in graph.nodes()}
+
+    subgraph_config = LikelihoodConfig(
+        node_attrs={n: likelihood_config.node_attrs[n] for n in graph.nodes()},
+        node_stats={n: likelihood_config.node_stats[n] for n in graph.nodes()},
+        weights={n: likelihood_config.weights[n] for n in graph.nodes()},
+        edges=subgraph_edges
+    )
+
+    return subgraph_config

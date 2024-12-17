@@ -134,7 +134,7 @@ class ReparameterizationVI:
         if self.conjugate_prior_parameters is None:
             self.conjugate_prior_parameters = {
                 'alpha': tf.Variable(
-                    initial_value=tf.ones(shape=[self.num_dims_theta], dtype=tf.float32),
+                    initial_value=2*tf.ones(shape=[self.num_dims_theta], dtype=tf.float32),
                     trainable=True
                 ),
                 'beta': tf.Variable(
@@ -200,7 +200,7 @@ class ReparameterizationVI:
         assert self.conjugate_prior_parameters is not None, "Conjugate prior parameters must be initialized"
         alpha = tfp.distributions.Gamma(self.conjugate_prior_parameters['alpha'],
                                         self.conjugate_prior_parameters['beta']).sample()
-        return alpha
+        return tf.maximum(alpha, 0.01)
 
     def log_prior_theta(self, theta: tf.Tensor, alpha: Optional[tf.Tensor]):
         """

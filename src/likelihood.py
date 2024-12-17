@@ -31,6 +31,7 @@ from src.logger import getlogger
 # Constants
 loglevel = os.getenv('LOGLEVEL', 'INFO').lower()
 log = getlogger(__name__, loglevel)
+DAMPING_FACTOR = 0.7
 
 
 @dataclass
@@ -52,8 +53,40 @@ class LikelihoodConfig:
     edges: Dict
 
 
+def check_h_convergence(H_prev: VectorizedH, H_current: VectorizedH, unique_x: tf.Tensor) -> bool:
+    """
+    -------------------------------------------------------
+    Checks convergence of H values for unique x values.
+    And if it has any issues
+    -------------------------------------------------------
+    Parameters:
+       H_prev - previous H function (VectorizedH)
+       H_current - current H function (VectorizedH)
+       unique_x - unique x values for nodes (tf.Tensor)
+    Returns:
+       converged - whether H values have converged (bool)
+    -------------------------------------------------------
+    """
+    h_vals = H_current(unique_x)
+    # Check for infinities or NaNs
+    if tf.reduce_any(tf.math.is_inf(h_vals)) or tf.reduce_any(tf.math.is_nan(h_vals)):
+        raise ValueError("H values contain inf or nan")
+
+    # Check for unreasonably large values
+    if tf.reduce_max(tf.abs(h_vals)) > 1e3:
+        log.warning("H values may be unstable - magnitudes exceeding 1e3")
+
+    # Check for negative values
+    if tf.reduce_any(h_vals < 0):
+        log.warning("H contains negative values which may indicate instability")
+
+    diff = tf.reduce_max(tf.abs(H_current(unique_x) - H_prev(unique_x)))
+    log.debug(f'Convergence check 0 Max diff: {diff}')
+    return float(diff) < 1e-3
+
+
 def H_star(node_attrs: Dict, node_stats: Dict, weights: Dict, theta: tf.Tensor, H: VectorizedH,
-           max_iter: int = 20) -> VectorizedH:
+           max_iter: int = 50) -> VectorizedH:
     """
     -------------------------------------------------------
     Computes the H* function through an iterative fixed-point computation for
@@ -98,18 +131,26 @@ def H_star(node_attrs: Dict, node_stats: Dict, weights: Dict, theta: tf.Tensor, 
         psi_values = compute_psi_values(unique_x, x_tensor, w_tensor, s_tensor, H_prev, V)
         # Compute means for each unique x
         psi_mean = {}
+        new_h = {}
         for x, indices in x_group.items():
             selected_psi_values = tf.gather(psi_values, indices, axis=0)
             psi = tf.reduce_mean(tf.cast(selected_psi_values, tf.float32), axis=[0, 1])
             psi_mean[x] = tf.cast(psi, tf.float16)
+            # Clip to the maximum number of nodes to prevent numerical issues
+            psi_mean[x] = tf.clip_by_value(psi_mean[x], 1e-7, len(node_attrs))
+
+            # Use relaxation/ damping factor to update H; prevents oscillations and stabilizes convergence
+            new_h[x] = DAMPING_FACTOR * H_prev.lookup[x] + (1 - DAMPING_FACTOR) * psi_mean[x]
 
         # Update H lookup
-        H_current.update(psi_mean)
+        # H_current.update(psi_mean)
+        H_current.update(new_h)
 
         # Check convergence - now comparing full tensors
-        diff = tf.stop_gradient(tf.reduce_max(tf.abs(H_current(unique_x) - H_prev(unique_x))))
-        if diff < 1e-4:
+        is_converged = check_h_convergence(H_prev, H_current, unique_x)
+        if is_converged:
             log.info(f"Convergence achieved after {i} iterations.")
+            H._is_converged = True
             break
 
     return H_current
@@ -132,7 +173,7 @@ def calculate_weights(s: float, node_vals: Iterable) -> float:
     t = tf.convert_to_tensor(list(node_vals))
     indicator_tensor = tf.cast(tf.greater(t, 0), tf.float16)
     denominator = tf.reduce_mean(indicator_tensor).numpy()
-    return s / denominator
+    return float(s / denominator)
 
 
 def vectorized_log_likelihood_contribution(Lijt: tf.Tensor, x_i: tf.Tensor, x_j: tf.Tensor, s_i: tf.Tensor,
@@ -166,7 +207,7 @@ def vectorized_log_likelihood_contribution(Lijt: tf.Tensor, x_i: tf.Tensor, x_j:
 
 
 def log_likelihood_optimized(theta: tf.Tensor, likelihood_config: LikelihoodConfig,
-                             H: Optional[VectorizedH] = None, use_mean: bool = False) -> tf.Tensor:
+                             H: Optional[VectorizedH] = None, use_mean: bool = False) -> [tf.Tensor, VectorizedH]:
     """
     -------------------------------------------------------
     Computes the log-likelihood for the network formation model using
@@ -190,6 +231,9 @@ def log_likelihood_optimized(theta: tf.Tensor, likelihood_config: LikelihoodConf
     H = H if H is not None else VectorizedH(k_dim=1, node_attrs=likelihood_config.node_attrs,
                                             node_stats=likelihood_config.node_stats)
     H = H_star(likelihood_config.node_attrs, likelihood_config.node_stats, likelihood_config.weights, theta, H)
+    # Verify H convergence before computing likelihood
+    if H is None or not hasattr(H, '_is_converged'):
+        raise ValueError("H must be converged before computing likelihood")
     x_i, x_j, s_i, s_j = [], [], [], []
     for i in likelihood_config.node_attrs.keys():
         for j in likelihood_config.edges[i]:
@@ -222,5 +266,6 @@ def log_likelihood_optimized(theta: tf.Tensor, likelihood_config: LikelihoodConf
     # Normalize by number of nodes
     ll += tf.reduce_mean(tf.cast(node_term, tf.float32)) if use_mean else tf.reduce_sum(tf.cast(node_term, tf.float32))
     # return tf.math.reduce_sum(theta), H
+    delattr(H, '_is_converged')
 
     return ll, H

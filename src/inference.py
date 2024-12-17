@@ -25,6 +25,7 @@ loglevel = os.getenv('LOGLEVEL', 'INFO').lower()
 log = getlogger(__name__, loglevel)
 SEED = int(os.getenv('RANDOMSEED', '4'))
 tf.random.set_seed(SEED)
+MAX_EXP = 10
 
 
 def sample_graph(likelihood_config: LikelihoodConfig, theta: tf.Tensor, H: VectorizedH) -> tf.Tensor:
@@ -68,7 +69,10 @@ def sample_graph(likelihood_config: LikelihoodConfig, theta: tf.Tensor, H: Vecto
 
     log.debug(f'{V.shape=} {H_i.shape=} {H_j.shape=}')
     # Sample edge with probability proportional to exp(V)/(1+H_i)(1+H_j)
-    p_ij = tf.exp(V) / (1 + H_i) / (1 + H_j)
+    denominator = tf.cast((1 + H_i) * (1 + H_j), tf.float32)
+    numerator = tf.cast(tf.exp(tf.minimum(V, MAX_EXP)), tf.float32)
+    p_ij = tf.cast(numerator / denominator, tf.float16)
+    log.debug(f'{p_ij.shape=}, Min: {tf.reduce_min(p_ij)}, Max: {tf.reduce_max(p_ij)}')
     # clip probabilities to avoid numerical issues
     p_ij = tf.clip_by_value(p_ij, 1e-7, 1.0)
 
@@ -120,14 +124,18 @@ def limiting_link_intensity(x_i: tf.Tensor, x_j: tf.Tensor, s_i: tf.Tensor, s_j:
 
     H_i = tf.tile(tf.expand_dims(H_i, axis=1), [1, x_j.shape[1]])
     H_j = tf.tile(tf.expand_dims(H_j, axis=1), [1, x_i.shape[1]])
-    s_i = tf.tile(s_i, [1, x_j.shape[1]])
-    s_j = tf.tile(s_j, [1, x_i.shape[1]])
-    m_i = tf.tile(m_i, [1, x_j.shape[1]])
-    m_j = tf.tile(m_j, [1, x_i.shape[1]])
+    s_i = tf.cast(tf.tile(s_i, [1, x_j.shape[1]]), tf.float32)
+    s_j = tf.cast(tf.tile(s_j, [1, x_i.shape[1]]), tf.float32)
+    m_i = tf.cast(tf.tile(m_i, [1, x_j.shape[1]]), tf.float32)
+    m_j = tf.cast(tf.tile(m_j, [1, x_i.shape[1]]), tf.float32)
+
+    # Cast to float32 for numerical stability
+    denominator = tf.cast((1 + H_i) * (1 + H_j), tf.float32)
+    numerator = tf.cast(tf.exp(tf.minimum(V, MAX_EXP)), tf.float32)
 
     # Compute link intensity
-    f = s_i * s_j * m_i * m_j * tf.exp(V) / ((1 + H_i) * (1 + H_j))
-    return f
+    f = s_i * s_j * m_i * m_j * numerator / denominator
+    return tf.cast(f, tf.float16)
 
 
 @tf.function
@@ -154,6 +162,7 @@ def sample_limiting_distribution(likelihood_config: LikelihoodConfig, theta: tf.
     s_j = tf.identity(s_i)
 
     p_ij = limiting_link_intensity(x_i, x_j, s_i, s_j, H, theta)
+    log.debug(f'{p_ij.shape=}, Min: {tf.reduce_min(p_ij)}, Max: {tf.reduce_max(p_ij)}')
     # clip probabilities to avoid numerical issues
     p_ij = tf.clip_by_value(p_ij, 1e-7, 1.0)
 
