@@ -20,6 +20,7 @@ import numpy as np
 # Constants
 loglevel = os.getenv('LOGLEVEL', 'INFO').lower()
 log = getlogger(__name__, loglevel)
+MAX_EXP = 10
 
 
 @tf.function
@@ -42,19 +43,19 @@ def compute_M_star(x_tensor: tf.Tensor, s_tensor: tf.Tensor, H: VectorizedH) -> 
     # Get H values for attributes
     H_values = H(x_tensor)  # [batch_size, k_dim]
 
-    # Compute components
-    numerator = tf.pow(H_values, s_tensor)  # H*(x)^s 
-    denominator = tf.pow(1 + H_values, s_tensor + 1)  # (1 + H*(x))^(s+1)
+    # Compute components with logs to avoid overflow
+    numerator = s_tensor * tf.math.log(H_values)  # H*(x)^s
+    denominator = (s_tensor + 1) * tf.math.log1p(H_values)  # (1 + H*(x))^(s+1)
 
     # Compute distribution
-    M = numerator / denominator
+    M = numerator - denominator
 
-    return M
+    return tf.math.exp(tf.minimum(M, MAX_EXP))
 
 
 @tf.function
 def compute_general_M_star(x_tensor: tf.Tensor, s_tensor: tf.Tensor, H: VectorizedH,
-                            theta: tf.Tensor, max_iter: int = 20) -> tf.Tensor:
+                           theta: tf.Tensor, max_iter: int = 20) -> tf.Tensor:
     """
     -------------------------------------------------------
     Computes the potential value distribution M* for the general case
@@ -75,7 +76,7 @@ def compute_general_M_star(x_tensor: tf.Tensor, s_tensor: tf.Tensor, H: Vectoriz
     M = compute_M_star(x_tensor, s_tensor, H)
 
     # Fixed point iteration
-    for _ in range(max_iter):
+    for i in range(max_iter):
         M_prev = tf.identity(M)
 
         # Compute Omega₀ mapping based on strategic effects
@@ -84,7 +85,10 @@ def compute_general_M_star(x_tensor: tf.Tensor, s_tensor: tf.Tensor, H: Vectoriz
 
         # Check convergence
         if tf.reduce_max(tf.abs(M - M_prev)) < 1e-6:
+            log.info("Converged after %d iterations", i)
             break
+
+    return M
 
 
 @tf.function

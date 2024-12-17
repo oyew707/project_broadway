@@ -71,10 +71,10 @@ def sample_graph(likelihood_config: LikelihoodConfig, theta: tf.Tensor, H: Vecto
     # Sample edge with probability proportional to exp(V)/(1+H_i)(1+H_j)
     denominator = tf.cast((1 + H_i) * (1 + H_j), tf.float32)
     numerator = tf.cast(tf.exp(tf.minimum(V, MAX_EXP)), tf.float32)
-    p_ij = tf.cast(numerator / denominator, tf.float16)
+    p_ij = numerator / denominator
     log.debug(f'{p_ij.shape=}, Min: {tf.reduce_min(p_ij)}, Max: {tf.reduce_max(p_ij)}')
     # clip probabilities to avoid numerical issues
-    p_ij = tf.clip_by_value(p_ij, 1e-7, 1.0)
+    p_ij = tf.cast(tf.clip_by_value(p_ij, 1e-7, 1.0), tf.float16)
 
     # L = tf.random.stateless_bernoulli(SEED, probs=p_ij, dtype=tf.int32)
     L = tf.random.stateless_uniform(p_ij.shape, seed=[SEED, SEED], minval=0, maxval=1, dtype=tf.float16) < p_ij
